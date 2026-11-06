@@ -3,21 +3,53 @@ package workshop.notificationservice.service
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import workshop.notificationservice.dao.NotificationEntity
+import workshop.notificationservice.dto.NotificationEvent
 import workshop.notificationservice.dto.TicketEvent
+import workshop.notificationservice.producer.NotificationEventProducer
 import workshop.notificationservice.repository.NotificationRepository
+import workshop.notificationservice.utils.NOTIFICATION_CREATED
 
 @Service
 class NotificationServiceImpl(
     private val notificationRepository: NotificationRepository,
+    private val notificationEventProducer: NotificationEventProducer
 ) : NotificationService {
     private val logger = LoggerFactory.getLogger(NotificationServiceImpl::class.java)
 
     override fun processTicketCreatedEvent(ticketEvent: TicketEvent) {
-        TODO("Not yet implemented")
+        createAndSendNotification(ticketEvent, "CREATED")
     }
 
     override fun processTicketUpdatedEvent(ticketEvent: TicketEvent) {
-        TODO("Not yet implemented")
+        createAndSendNotification(ticketEvent, ticketEvent.status)
+    }
+
+    private fun createAndSendNotification(ticketEvent: TicketEvent, messageStatus: String) {
+        val notification = NotificationEntity(
+            ticketId = ticketEvent.ticketId,
+            customerId = ticketEvent.customerId,
+            message = createNotificationMessage(ticketEvent.ticketId, messageStatus),
+            status = ticketEvent.status,
+            timestamp = System.currentTimeMillis()
+        )
+        val savedNotification = notificationRepository.save(notification)
+
+        sendNotificationToCustomer(savedNotification)
+
+        val notificationId = requireNotNull(savedNotification.id) {
+            "Saved notification did not have an ID"
+        }
+        notificationEventProducer.produce(
+            NotificationEvent(
+                eventType = NOTIFICATION_CREATED,
+                notificationId = notificationId,
+                ticketId = savedNotification.ticketId,
+                customerId = savedNotification.customerId,
+                message = savedNotification.message,
+                status = savedNotification.status,
+                timestamp = savedNotification.timestamp
+            )
+        )
     }
 
     private fun createNotificationMessage(ticketId: String, status: String): String {
